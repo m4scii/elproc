@@ -1,0 +1,5 @@
+#!/bin/sh
+name=${1:?'Which document to process?'}
+shift;
+elproc16 < $name.elproc > $name.ss && \
+ mzscheme -r $name.ss "$@" > $name.html

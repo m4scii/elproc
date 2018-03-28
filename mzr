@@ -1,0 +1,4 @@
+#!/bin/sh
+code=`cat`
+asm=`printf "$code" | elproc17`
+mzscheme -e "$asm"

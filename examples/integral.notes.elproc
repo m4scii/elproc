@@ -1,0 +1,57 @@
+@top x Sobre /integrais/
+
+@s Introdução
+
+Integrar é computar o limite de uma soma infinita. Obviamente o limite
+precisa existir e é por isso que há de se prestar atenção em como o
+delta é expresso; de outra forma, sua integral não converge, e logo a
+soma não existe.
+
+@s Sobre curvas
+
+Integrar sobre curvas requer parametrização. Dado /[f(x,y)]/ sobre uma
+curva /C/, desejamos
+
+  @v int_C f(x,y) ds =
+      int_(a,b) f(x(t), y(t)) sqrt( [dx/dt]^2 + [dy/dy]^2 ) dt v@
+
+Isto é, desejamos os retangulos formados a partir de uma largura /ds/
+e que tudo seja expresso em função de um parametro /t/. Ou seja, a
+integral de curva é, na verdade, uma integral em uma variável.
+
+E por quê temos uma raiz quadrada? Ela representa o /ds/. Mas o que é
+o /ds/? O /ds/ é o ``tamanho'' de um pedacinho da curva. Em sua
+definição, o /ds/ é apenas uma aproximação; ao invés de uma curva,
+computamos uma linha reta ``próxima'' da curva; é uma diagonal de um
+retângulo; daí a raiz quadrada. Veja.
+
+Considere uma curva /f/ de forma que saibamos dois pontos nela; são
+eles x1, y1 e x2, y2. A inclinação média entre eles é 
+
+ @v (y2 - y1)/(x2 - x1) v@ 
+
+e o comprimento /ds/ do semento que conecta os dois pontos é
+
+ @v ds = sqrt( (x2 - x1)^2 + (y2 - y1)^2 ). v@
+
+Agora se pensarmos sobre a variação em /x/ e em /y/ como sendo uma
+variável parametrizada por um tempo /t/, acabamos por pensar em um
+/ds/ como a hipotenusa resultante de um triângulo reto com lados bem
+pequenos, que variam com o tempo. Daí escrevemos
+
+ @v ds = sqrt( (dx/dt)^2 + (dy/dt)^2 ). v@
+
+Isso não é rigoroso; mas eu creio que isso é uma forma muito sensata
+de pensar sobre o comprimento de um arquinho de uma curva. Honestidade
+em primeiro lugar. Rigorosamente, entretanto, veremos o que temos.
+
+@s O rigor via um parâmetro
+
+Declare /f/ uma curva paramétrica em /t/. Isto é, 
+  /[x = x(t), y = y(t)]/. E agora temos que as diferenças horizontais
+e verticais --- os catetos --- são /[x(t2) - x(t1)]/ e /[y(t2) - y(t1)]/.
+Daí 
+
+ @v ds = sqrt( (x(t2) - x(t1))^2 + (y(t2) - y(t1))^2 ). v@
+
+@end Wed Dec 30 16:16:52 CET 2009

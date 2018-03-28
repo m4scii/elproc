@@ -1,0 +1,189 @@
+(require scheme/date)
+
+;; scanner: ,m for marks, // for marks, ( for s-expressions
+(define (marks-next-token [in (current-input-port)])
+  (current-input-port in)
+
+  (let ([c (peek-char)])
+    (cond
+     [ (eq? c eof) (consume-char-returning 'exit) ]
+     [ (eq? c #\() (read) ]
+     [ (eq? c #\[) (consume-char-returning 'bracket)]
+     [ (eq? c #\,) (consume-char-returning 'comma)]
+     [ (eq? c #\|) (consume-char-returning 'pipe)]
+     [ (eq? c #\/) (consume-char-returning 'slash)]
+     [ (eq? c #\*) (consume-char-returning 'star)]
+     [ else (consume-char-returning c) ])))
+
+;; now, the mess! lol
+
+(define ttflag "out")
+(define bflag "out")
+(define emflag "out")
+
+(define *tag-star* "b")
+(define *tag-slash* "em")
+(define *tag-pipe* "tt")
+
+(define (read-chars-until k)
+  (let ([c (peek-char)])
+    ;;(fprintf (current-error-port) "read-chars-until: <~a>\n" c)
+    (cond
+     [ (eq? c eof) (read-char) "" ] ;; syntax error?
+     [ (char=? c k) (read-char) "" ] ;; end of mark ever found?
+     [ else (string-append (string (read-char)) (read-chars-until k))])))
+
+;; interpreter for marks
+(define (marks-parse-tokens [in (current-input-port)])
+
+  (let ( [t (marks-next-token in)] )
+    (cond 
+     [ (eq? t 'exit) ""] ;; zi empty strrring
+
+     [ (list? t) ;; no comment
+       (string-append (format "~a" 
+                              (let ([r (eval t)])
+                                (cond 
+                                 [ (number? r)
+                                   (number->string r)]
+                                 [ else 
+                                   r]))) (marks-parse-tokens)) ]
+
+     [ (eq? t 'bracket) ;; implement the bracket hack
+       (string-append (read-chars-until #\]) (marks-parse-tokens))]
+
+     [ (eq? t 'space) (string-append " " (marks-parse-tokens))]
+
+     [ (eq? t 'star) 
+       (cond 
+	[(equal? bflag "out")
+	 (set! bflag "in")
+	 (string-append (format "<~a>" *tag-star*) (marks-parse-tokens))]
+	[(equal? bflag "in") 
+	 (set! bflag "out") 
+	 (string-append (format "</~a>" *tag-star*) (marks-parse-tokens))]
+	[ else "<error!!>" ])]
+
+     [ (eq? t 'slash) 
+       (cond 
+	[(equal? emflag "out")
+	 (set! emflag "in")
+	 (string-append (format "<~a>" *tag-slash*) (marks-parse-tokens))]
+	[(equal? emflag "in") 
+	 (set! emflag "out") 
+	 (string-append (format "</~a>" *tag-slash*) (marks-parse-tokens))]
+	[ else "<error!!>" ])]
+
+     [ (eq? t 'pipe) 
+       (cond 
+	[(equal? ttflag "out")
+	 (set! ttflag "in")
+	 (string-append (format "<~a>" *tag-pipe*) (marks-parse-tokens))]
+	[(equal? ttflag "in") 
+	 (set! ttflag "out") 
+	 (string-append (format "</~a>" *tag-pipe*) (marks-parse-tokens))]
+	[ else "<error!!>" ])]
+
+     [ (eq? t 'comma) ;
+       (cond 
+
+	[(char-alphabetic? (peek-char)) ;;mark
+	 (let ( [tg (read-char)] )
+	   (format "<~c>~a</~c>" tg (marks-parse-tokens) tg))]
+
+	[ else (string-append "," (string (read-char)) (marks-parse-tokens)) ])]
+
+     [ else (string-append (string t) (marks-parse-tokens))])))
+
+;; consume a char returning p
+(define (consume-char-returning p)
+  (read-char)
+  p)
+
+;; remember that every user function takes a list of strings which can
+;; be flattened into one string with (string-append* ls).
+
+(define (top title)
+    (printf "<html><head><title>~a</title>
+<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=utf-8\">
+</head><body>\n\n" title))
+
+(define (end-date str)
+  (printf "Created: ~a.<br>\nUpdated: ~a.\n" 
+          (list->string (reverse (cdr (reverse (string->list str))))) ;; must be defined by user
+          (date->string (seconds->date (current-seconds)) #t)))
+
+(define (end date)
+  (begin
+    (printf "<p>")
+    (end-date date)
+    (printf "</body></html>\n")))
+
+(define (xchange s1 s2 s)
+  (regexp-replace* (regexp-quote s1) s s2))
+
+(define (with-br str)
+  (regexp-replace* "\n" str "<br>\n"))
+
+(define (with-p str)
+  (regexp-replace* "\n\n" str "<p>\n"))
+
+(define (pr s)
+  (printf "~a\n" s))
+
+(define (s name) ;;s = section
+  (pr
+   (format "<h2>~a</h2>\n" name)))
+
+(define (v stuff)
+  (pr
+   (format "<pre>~a</pre>\n" stuff)))
+
+(define (tt stuff)
+  (pr
+   (format "<pre>~a</pre>\n" (string-append* stuff))))
+
+(define (par stuff)
+  (let* ([s (map (lambda (x)
+                   (cond 
+                    [(number? x) (number->string x)]
+                    [(string? x) x])) stuff)]
+         [s (string-append* s)])
+    (pr
+     (format "<p>~a</p>\n" (marks-parse-tokens (open-input-string s))))))
+
+(define (bq text) ;; cite
+  (pr 
+   (format "\n<blockquote>~a</blockquote>\n" (with-p text))))
+
+(define (q text) ;; cite with quote marks
+  (pr (format "\n<blockquote>``~a''</blockquote>\n" text)))
+
+(define (ln url [word url]) ;; ln = link
+  (format "<a href=\"~a\">~a</a>" url word))
+
+(define (put-marks s)
+  (marks-parse-tokens (open-input-string s)))
+
+(define (ls-dwn stuff)
+  (let ([s (string-append* stuff)])
+    (let ([couple (regexp-split "\n" s)])
+      (pr (format "<p>~a<br>\n~a\n\n" 
+                  (put-marks (first couple)) 
+                  (ln-dwn (second couple)))))))
+
+(require scheme/system)
+
+(define *dwn-dir* "./")
+
+(define (ln-dwn url [word url]) ;;ln = link
+  (let ([r (system/exit-code (format "wget -P '~a' -nc '~a'" (string-append "./" *dwn-dir*) url ))])
+    (when (equal? r 0)
+      (set! word (last (regexp-split "/" url))))
+    (format "<a href=\"~a/~a\">~a</a>" *dwn-dir* word word)))
+
+(define (ig s)
+  (pr (format "~a" s)))
+
+(define (null s)
+  #t)

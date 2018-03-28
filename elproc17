@@ -1,0 +1,339 @@
+#!/usr/bin/env mzscheme
+(module elproc17 scheme
+
+(provide (all-defined-out))
+
+;; token queue
+(define t-queue '())
+
+(define (token-enq x)
+  (set! t-queue 
+        (reverse (cons x (reverse t-queue))))
+  t-queue)
+
+(define (token-deq)
+  (when (equal? t-queue '())
+    (err "t-queue: crash; deq an empty queue?"))
+  (let ([c (car t-queue)])
+    (set! t-queue (cdr t-queue))
+    c))
+
+(define (next-token)
+  ;; keep queue filled up
+  (let fill-up-queue ()
+    (cond
+     [(= (length t-queue) 2) 
+      ;; full; return the leading token
+      (token-deq)]
+     [else ;; enq, then loop
+      (token-enq (read-token))
+      (fill-up-queue)])))
+
+(define (peek-token [pos 0])
+  (list-ref t-queue pos))
+
+(define g-stack '())
+
+(define (close-paragraph)
+  ;;(printf "\nclose paragraph\n")
+  (close "par")
+  (printf "))\n"))
+  
+(define (open-paragraph)
+  ;;(printf "open paragraph\n")
+  (open "par")
+  (printf "(par (list "))
+
+(define (open x)
+  (show-on-fd-2 (format "open: ~a\n" g-stack))
+  (set! g-stack (cons x g-stack))
+  g-stack)
+
+(define (close x)
+  (show-on-fd-2 (format "close: ~a\n" g-stack))
+  (when (equal? g-stack '())
+    (err "g-stack: stack underflow"))
+  (set! g-stack (cdr g-stack))
+  g-stack)
+
+;; word: a non-whitespace sequence of chars; used by the scanner
+(define (read-word)
+
+  (let ([c (peek-char)]) ;; leave whitespace in the flux
+
+    (cond
+
+     [ (or (equal? c eof)  (char-whitespace? c)) 
+       "" ]
+
+     [ else 
+       (string-append (string (read-char)) (read-word)) ])))
+
+;; scanner
+(define (read-token)
+
+  (let ([c (peek-char)])
+    ;;(show-on-fd-2 (format "\ntoken: <~a>\n" c))
+    (cond
+
+     ;; eof
+     [ (equal? c eof) (consume-char-returning (list 'exit c)) ]
+
+     ;; scheme code
+     [ (equal? c #\() (list 'scheme (read)) ]
+
+     ;; escape; read one char, return the next
+     [ (equal? c #\\) ;; THIS IS BROKEN, SIR!
+       (printf "ESCAPE!\n") 
+       (list 'char (begin (read-char) (read-char)))]
+
+     ;; newline
+     [ (equal? c #\newline) (consume-char-returning (list 'newline #\newline)) ]
+       
+     ;; whitespace
+     [ (char-whitespace? c) (consume-char-returning (list 'space c)) ]
+
+     ;; if @ is in the flux, peek and see if the next character forms
+     ;; a command; if not, return the @ character alone because we
+     ;; shall treat it as if we had found it escaped --- that is, by
+     ;; itself. also notice that email@addresses is permissible;
+     ;; they're words; see read-word for a precise answer.
+
+     [ (equal? c #\@) 
+
+       ;; if you find @hide, then read until you find another word
+       ;; which is hide@; ignore everything up to that point. we
+       ;; really need this behavior; must be a scanner behavior.
+       ;; otherwise things will go wrong; for example, put some scheme
+       ;; code commented out and try to hide it, and the parser will
+       ;; be unable to. (we also need to get the escape character to
+       ;; work)
+
+       (let ([c (peek-char (current-input-port) 1)])
+         ;;(printf "@-token: <~a>\n" c)
+         (cond 
+
+          [ (or (char-alphabetic? c) (char-numeric? c))
+            (read-char) 
+            (list '@ (read-word))]
+
+          [ else (list 'char (read-char)) ]))]
+
+     ;; word
+     [ (char-alphabetic? c) 
+
+       (let ([w (read-word)])
+
+         (cond
+          [ (regexp-match "@$" w) ;; closing a function call
+            (list '@-close (rm-last-char w)) ;; the last char is simply @
+            ]
+
+          [ else (list 'word w) ]))]
+
+     ;; even binary data will be considered a char
+     [ else (consume-char-returning (list 'char c)) ])))
+
+;; parser-string
+(define (parser-string s)
+  (parser (open-input-string s)))
+
+;; parser
+(define (parser [in (current-input-port)])
+  (current-input-port in)
+
+  (let ( [token (next-token)] )
+    (let ([sym (first token)] [val (second token)])
+
+      (show-on-fd-2 (format "(~a | ~a)\n" sym val))
+
+      (cond 
+
+        [ (equal? sym 'exit)
+
+          (when (member "par" g-stack)
+                (close-paragraph))
+
+          (when (not (= 0 (length g-stack)))
+            (syn (format "the following tags where not closed: ~a" g-stack)))
+
+          (printf "(exit)\n")
+          (exit)]
+
+        [ (equal? sym 'scheme)
+          (display (format "~s " val))]
+
+        [ (equal? sym 'newline)
+
+          (cond 
+             [(equal? (car (peek-token)) 'newline) ;; double new line found
+
+              (token-deq) ;; consume the token
+
+              ;; listen up! double line closes a paragraph! only! it's
+              ;; a word, or a character that begins a paragraph. pay
+              ;; attention, sir. things are simple.
+
+              (when (member "par" g-stack)
+                    (close-paragraph))]
+
+             [ else ;; single new line found
+               (out (format "~s " (string val)))])]
+
+        [ (equal? sym 'char)
+          (out (format "~s " (string val)))]
+
+        [ (equal? sym 'space)
+
+          (cond 
+           ;; if we get a @-close symbol right after a space, ignore
+           ;; this space; do nothing, in other words. also, if we get
+           ;; an @-open symbol after this space, then ignore it too.
+
+           [ (or 
+              (equal? (car (peek-token)) 'scheme)
+              (equal? (car (peek-token)) '@-close)
+              (equal? (car (peek-token)) '@))
+             "" ] ;; do nothing
+
+           [ else
+             (out (format "~s " (string val)))])]
+
+        [ (equal? sym 'word)
+          (when (null? g-stack)
+                (open-paragraph))
+
+          (out (format "~s " val))]
+
+        ;; recursively[?] dig for more
+        [ (equal? sym '@)
+
+          ;;(printf "\ntoken: (~a ~a ~a)\n" n type cmd)
+          (cond 
+           ;; @v ... v@
+           [ (equal? "v" val) (token-deq)
+             (printf "(v ~s)\n" (read-stream-until-token (list '@-close "v")))]
+
+           [ (equal? "hide" val) (token-deq)
+             (read-stream-until-token (list '@-close "hide"))]
+
+           [ (equal? "pass" val) (token-deq)
+             (printf "(display ~s)\n" (read-stream-until-token (list '@-close "pass")))]
+
+           ;; my own personal html
+           [ (equal? "s" val) (token-deq)
+             (printf "(s ~s)\n" 
+                     (read-stream-until-token (list 'newline #\newline)))]
+
+           ;; my own personal html
+           [ (equal? "top" val) (token-deq)
+             (printf "(top ~s)\n" 
+                     (read-stream-until-token (list 'newline #\newline)))]
+
+           ;; my own personal html
+           [ (equal? "end" val) (token-deq)
+             (printf "(end ~s)\n" 
+                     (read-stream-until-token (list 'newline #\newline)))]
+
+           [ else
+             (open val) 
+             (token-deq) ;; ignore first space by throwing next token away (a whitespace for sure)
+             (printf "(~a (list " val)])]
+          
+        [ (equal? sym '@-close)
+          (when (null? g-stack)
+            (syn (format "found the closing of ``@~a'' without having been opened." val)))
+
+          (let ([cmd (car g-stack)])
+            (when (not (equal? val cmd))
+              (syn (format "found ~a as a closing of ~a, which is ungrammatical." val cmd))))
+
+          ;; if next token is a *space only*, throw it away.
+          (when (equal? (second (peek-token)) #\space)
+                (token-deq))
+          
+          (close val)
+          (printf "))\n")]
+
+        [ else 
+          (syn (format "roar! you found a raptor: (~a ~a)\n" sym val))])))
+  (parser))
+
+;; remove-last-char
+(define (rm-last-char s)
+  (list->string (reverse (cdr (reverse (string->list s))))))
+
+(define (out s)
+  (display 
+   (cond 
+    [(= (length g-stack) 0)
+     (format "(display ~a)\n" s)]
+    [ else
+       (format "~a" s)])))
+
+(define (syn s)
+  (flush-output)
+  (fprintf (current-error-port) "\nsyntax error: ~a\n" s)
+  (exit))
+
+(define (err s)
+  (flush-output)
+  (fprintf (current-error-port) "\ninternal error: ~a\n" s)
+  (exit))
+
+;; (define (read-n-lines n cmd)
+;;   (cond 
+;;    [(= 0 n) "" ]
+;;    [ else
+;;      (read-char) ;; cosmetics; gets rid of the first space
+;;      (string-append (read-line) "\n" (read-n-lines (- n 1) cmd))]))
+
+;; (define (read-n-words n cmd)
+;;   (read-char)
+;;   (cond 
+;;    [(= 0 n) "" ]
+;;    [ else
+;;      (string-append (read-word) " " (read-n-words (- n 1) cmd))]))
+
+(define (read-stream-until-token s)
+  (let* ([t (next-token)]
+         [sym (first t)] 
+         [val (second t)]
+         [ssym (first s)] 
+         [sval (second s)])
+
+    ;;(fprintf (current-error-port) "(~a,~a)" sym val)
+
+    (cond
+     [ (equal? sym 'exit) 
+       ;;(syn (format "I expected token <~a> and found end of file instead." ssym))
+       ""]
+
+     [ (and (equal? sym ssym)  (equal? val sval))
+       ""]
+       
+     [ else 
+       (string-append 
+          (cond 
+           [(string? val) val]
+           [(list? val) (format "~s" val)]
+           [else (string val)]) (read-stream-until-token s))])))
+
+
+;; consume a char returning p
+(define (consume-char-returning p)
+  (read-char)
+  p)
+
+(define (show-on-fd-2 s)
+  "a debug function"
+  ;;(fprintf (current-error-port) "~a" s)
+)
+
+;; so far i always use it for html
+(printf "(include ~s)\n" "html.elproc")
+
+;; main =
+(parser)
+
+)

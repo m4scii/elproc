@@ -1,0 +1,135 @@
+#!/usr/bin/env mzscheme
+(module elproc scheme
+
+;(provide next-token parse-at read-word code)
+
+;; scanner: if list read; otherwise, investigate
+(define (next-token)
+  (let ([c (peek-char)])
+    ;(printf "token: <~a>\n" c)
+    (cond
+     [ (eq? c #\() (read) ]
+
+     [ (eq? c eof) (consume-char-returning 'exit) ]
+     [ (eq? c #\newline) (consume-char-returning 'newline) ]
+     [ (eq? c #\@) (consume-char-returning '@) ]
+     
+     [ (not (char-whitespace? c))
+       (read-word) ] ; return string
+     
+     [ (char-whitespace? c) (consume-char-returning c) ]
+     
+     [ else (consume-char-returning 'error) ])))
+
+;; word: a non-whitespace sequence of chars
+(define (read-word)
+  (let ([c (peek-char)]) ; we leave the whitespace in the flux
+    (cond
+     [ (char-whitespace? c) "" ] ; this could probably be folded
+     [ else (string-append (string (read-char)) (read-word)) ])))
+
+; paragraph: <char-alphabetic>\n\n
+(define (read-paragraph)
+  (let ([ln (peek-line)])
+    ;;(printf "read-paragraph: <~s>\n" ln)
+    (cond
+     [ (equal? ln eof) "" ] ; eof
+     [ (equal? ln "") "" ] ; end of paragraph
+     [ else (string-append (read-line) "\n" (read-paragraph))])))
+
+;; peek a line
+(define (peek-line [n-skip 0])
+  (let ([c (peek-char (current-input-port) n-skip)])
+    (cond
+     [ (equal? c eof) "" ]
+     [ (equal? c #\newline) "" ]
+     [ else (string-append (string c) (peek-line (+ 1 n-skip)))])))
+
+(define (read-lines-until s)
+  (let ([ln (peek-line)])
+    (cond
+     [ (equal? ln eof) "" ] ; eof
+     [ (equal? ln s) (begin (read-line) "") ] ; end of mark
+     [ else (string-append (read-line) "\n" (read-lines-until s))])))
+
+;; consume a char returning p
+(define (consume-char-returning p)
+  (read-char)
+  p)
+
+(define (showtokens)
+  (let loop ([t (next-token)])
+    (cond
+     [ (eq? t 'exit) (begin (display "<done>\n") (exit)) ]
+     [ else 
+       (begin
+	  (printf "~a\n" t)
+	  (loop (next-token))) ])))
+
+(define (parse-at t)
+  (printf ";; <parse-at ~a>\n" t)
+
+  (let ([cmd (read-word)])
+    (cond 
+
+     [ (equal? cmd "s")
+       (printf "(pr (s ~s)) ;;section\n\n" (read-line)) ]
+
+     [ (equal? cmd "v")
+       (let ((str (read-lines-until "@v")))
+	 (printf "(pr (pre ~s)) ;;teletype\n\n" str)) ]
+
+     [ (equal? cmd "top")
+       (printf "(top ~s) ;;top\n\n" (read-line)) ]
+     
+     [ (equal? cmd "end")
+       (printf "(bottom ~s) ;;end\n" (read-line)) ]
+
+     [ else 
+       (let ([block (read-lines-until (string-append "@" cmd))])
+       (printf "(~a ~s) ;;~a = user-defined?\n" cmd block cmd)) ]))
+  t)
+
+(define (code str)
+  (printf "~a\n" str)
+  str)
+
+; parse
+(define (parse-tokens)
+  (let ( [t (next-token)] )
+    (cond 
+     [ (eq? t 'exit) (begin (code "(exit)") (exit)) ]
+
+     [ (eq? t 'newline) ;@cmd after \n
+              
+       (cond 
+        [ (eq? (peek-char) eof) (begin (code "(exit)") (exit))]
+
+	[(or (char-alphabetic? (peek-char)) (char-numeric? (peek-char))) ;; paragraph begins
+	 (printf "(display (par ~s)) ;; paragraph\n\n" (read-paragraph))]
+
+	[(eq? (peek-char) #\@)
+	   (parse-at (read-char)) ]
+	[else (printf "(display ~s) ;; newline\n" #\newline)] )]
+
+;;      [ (eq? t #\@) ;@cmd in the flux
+;;        (parse-at-flux (read-char)) ]
+
+     [ (list? t) ; scheme code
+       (printf "~s ;; scheme\n" t) ]
+
+     [ (and (char? t) (char-whitespace? t))
+       (printf "(display ~s) ;; space?\n" t)]
+
+     [ (eq? t 'error) 
+       (printf "~a ;; error\n" t)]
+
+     [ else 
+       (printf "(display ~s) ;; string\n" t) ])
+    (parse-tokens)))
+
+;; main is here
+; (showtokens)
+(parse-tokens)
+
+)

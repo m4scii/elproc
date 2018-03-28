@@ -1,0 +1,220 @@
+#!/usr/bin/env mzscheme
+(module elproc4 scheme
+
+(provide (all-defined-out))
+
+;; hash table for @-functions
+;; (define tab-at (make-hash))
+
+;; scanner
+(define (next-token [in (current-input-port)])
+  (current-input-port in)
+
+  (let ([c (peek-char)])
+    ;(show-on-fd-2 "\ntoken: <~a>\n" c)
+    (cond
+
+     ; eof
+     [ (eq? c eof) (consume-char-returning (list 'exit c)) ]
+
+     ; scheme code
+     [ (eq? c #\() (list 'scheme (read)) ]
+
+     ; escape
+     [ (eq? c #\\) (list 'char (begin (read-char) (read-char))) ]
+
+     ; newline
+     [ (eq? c #\newline) 
+       (cond
+        [ (and ; stand alone paragraphs begins
+           (= 0 (length g-stack))
+           (let ([next (peek-char in 1)])
+             (and ; if eof, bail out; a paragraph cannot begin in eof, right?
+              (not (eq? eof next)) 
+              (char-alphabetic? next))))
+          (open "par")
+          (read-char) ; cosmetics. discard the first newline
+          (list '@ "par")]
+
+        [ (and ; stand alone paragraphs ends
+           (not (= 0 (length g-stack)))
+           (equal? (first g-stack) "par")
+           (let ([next (peek-char in 1)])
+             (or ; eof means it should close indeed
+              (eq? eof next)
+              (equal? #\newline next))))
+          (close "par")
+          (list '@-close "par")]
+
+        [ else
+          (consume-char-returning (list 'newline c)) ])]
+
+     ; whitespace
+     [ (char-whitespace? c) (consume-char-returning (list 'space c)) ]
+
+     ; if @ is in the flux, peek and see if the next is alphabetic; if
+     ; so, then it's a command; otherwise return the character @
+     ; because we shall treat it as if we had found \@, by itself, in
+     ; the flux. notice that email@addresses are no problem; they're
+     ; words; see read-word.
+     [ (eq? c #\@) 
+       (let ([c (peek-char (current-input-port) 1)])
+         ;(printf "@-token: <~a>\n" c)
+         (cond 
+          [ (or (char-alphabetic? c) 
+                (char-numeric? c))
+            (read-char) 
+            (list '@ (read-word))]
+          [ else (list 'char (read-char)) ]))]
+
+     ; word
+     [ (char-alphabetic? c) 
+       (let ([w (read-word)])
+         (cond
+          [ (regexp-match "@$" w) (list '@-close (rm-last-char w))]
+          [ else (list 'word w) ]))]
+
+     ; even binary data will be considered a char
+     [ else (consume-char-returning (list 'char c)) ])))
+
+; parser-string
+(define (parser-string s)
+  (parser (open-input-string s)))
+
+; parser
+(define (parser [in (current-input-port)])
+  (let ( [token (next-token in)] )
+    (let ([sym (first token)] [val (second token)])
+
+      (show-on-fd-2 (format "(~a | ~a)\n" sym val))
+
+      (cond 
+
+        [ (eq? sym 'exit)
+          (when (not (= 0 (length g-stack)))
+            (syn (format "the following tags where not closed: ~a" g-stack)))
+          (printf "(exit)\n")
+          (exit)]
+
+        [ (eq? sym 'scheme)
+          (display (format "~s " val))]
+
+        [ (eq? sym 'newline)
+          (out (format "~s " (string val)))]
+
+        [ (or (eq? sym 'char)
+              (eq? sym 'space))
+          (out (format "~s " (string val)))]
+
+        [ (eq? sym 'word)
+          (out (format "~s " val))]
+
+        ;; recursively[?] dig for more
+        [ (eq? sym '@)
+
+          ;; if a command begins with a number, then some special
+          ;; rules apply; for instance, @3lbold means that 3 lines are
+          ;; to be read and ``bold'' is the function; @5wsoup means
+          ;; that the next 5 words are to be read and ``soup'' is the
+          ;; function. such commands need not be closed, because we
+          ;; know beforehand where they end. until i can think of
+          ;; anything better, i'm only going to allow numbers from 1
+          ;; to 9. that shall be enough for me, and SHALL BE THE WHOLE
+          ;; OF THE LAW! \o/
+
+          (let ([n (first (string->list val))] ;; n
+                [type (second (append (string->list val) '(#\a #\a)))] ;; it's a hack
+                [cmd (list->string (cdr (cdr (append (string->list val) '(#\a #\a)))))]) ;; cmd
+            ;;(printf "\ntoken: (~a ~a ~a)\n" n type cmd)
+            (cond 
+             [ (char-numeric? n)
+               (show-on-fd-2 (format "(n<~a> type<~a> cmd<~a>)\n" n type cmd))
+               (cond 
+                ;; n -word command
+                [ (equal? type #\w)
+                  (printf "(~a ~s) " cmd (read-n-words (string n) cmd))]
+                ;; line command
+                [ (equal? type #\l)
+                  (printf "(~a ~s) " cmd (read-n-lines (string n) cmd))]
+                
+                [ else
+                  (syn "after a number, only l (ell) or w (dableew) is allowed.")])]
+             [ else
+               (open val)
+               (printf "(~a (list " val)]))]
+          
+        [ (eq? sym '@-close)
+          (close val)
+          (printf "))\n")]
+
+        [ else 
+          (syn (format "roar! found a raptor: (~a ~a)\n" sym val))])))
+  (parser))
+
+(define (read-n-lines n cmd)
+  (cond 
+   [(= 0 (string->number n)) "" ]
+   [ else ; could be folded
+     (string-append (read-line) "\n" (read-n-lines (format "~a" (- (string->number n) 1)) cmd))]))
+
+(define (read-n-words n cmd)
+  (read-char)
+  (cond 
+   [(= 0 (string->number n)) "" ]
+   [ else ; could be folded
+     (string-append (read-word) " " (read-n-words (format "~a" (- (string->number n) 1)) cmd))]))
+
+(define g-stack '())
+
+(define (open x)
+  (set! g-stack (cons x g-stack))
+  g-stack)
+
+(define (close x)
+  (when (equal? g-stack '())
+    (err "g-stack: stack underflow"))
+  (set! g-stack (cdr g-stack))
+  g-stack)
+
+; remove-last-char
+(define (rm-last-char s)
+  (list->string (reverse (cdr (reverse (string->list s))))))
+
+(define (out s)
+  (display 
+   (cond 
+    [(= (length g-stack) 0)
+     (format "(display ~a)\n" s)]
+    [ else
+       (format "~a" s)])))
+
+(define (syn s)
+  (flush-output)
+  (fprintf (current-error-port) "\nsyntax error: ~a\n" s)
+  (exit))
+
+(define (err s)
+  (flush-output)
+  (fprintf (current-error-port) "\ninternal error: ~a\n" s)
+  (exit))
+
+;; word: a non-whitespace sequence of chars
+(define (read-word)
+  (let ([c (peek-char)]) ; leave whitespace in the flux
+    (cond
+     [ (or (eq? c eof) 
+           (char-whitespace? c)) "" ]
+     [ else (string-append (string (read-char)) (read-word)) ])))
+
+;; consume a char returning p
+(define (consume-char-returning p)
+  (read-char)
+  p)
+
+(define (show-on-fd-2 s)
+  (fprintf (current-error-port) "~a" s))
+
+; main =
+(parser)
+
+)

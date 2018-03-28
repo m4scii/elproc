@@ -1,0 +1,67 @@
+
+@1ltop /El proc/: el processador de documentos
+
+@1ls Introdução 
+
+Estou trabalhando, ora lá, ora cá, num processador de documentos. Faço
+anotações às vezes sobre coisas; e minha homepage organiza um índice
+para o meu bel prazer. Só que ``homepage'' significa pelo menos HTML,
+e HTML é um saco; muito repetitivo. Gosto de escrever com pequenas
+marcas; daí, à partir delas, alguém gera o HTML. Daí, ora lá, ora cá,
+eu trabalho neste processador de documentos. Chama-se /elproc/; 
+vem de ``el processador.''
+
+Não posso falar muito sobre /elproc/ porque ele é uma metaformose
+ambulante; vou dizer que /elproc/ é escrito em Scheme e suporta
+Scheme. Não posso falar mais se não terei que re-escrever esses
+parágrafos amanhã já, porque a metamorfose está em desenvolvimento
+diário.
+
+(define (pkg2 fn)
+  (format "~a" (ln fn (first (regexp-match "[0-9].[0-9][0-9]" fn)))))
+
+(define (pkg v)
+  (pkg2 (string-append "files/elproc-" (format "~a" v) ".cpio.gz")))
+
+(define (pkgs f . ls)
+  (format "~a"
+   (foldr string-append "" (add-between (map pkg (cons f ls)) ",\n"))))
+
+@1ls Pacotes
+
+Os pacotes são [(pkgs 0.02 0.12 0.13)]; estão em ordem histórica.
+
+@1ls Um exemplo 
+
+Os links para esses pacotes foram escrito da seguinte forma.
+
+@v
+(define (pkg2 fn)
+  (format "~a" (ln fn (first (regexp-match "[0-9].[0-9][0-9]" fn)))))
+
+(define (pkg v)
+  (pkg2 (string-append "files/elproc-" (format "~a" v) ".cpio.gz")))
+
+(define (pkgs f . ls)
+  (format "~a"
+   (foldr string-append "" (add-between (map pkg (cons f ls)) ",\n"))))
+
+@1ls Pacotes
+
+Os pacotes são [(pkgs 0.02 0.12 0.13)]; estão em ordem histórica.
+v@
+
+Que tal a idéia? Note que os colchetes ao redor dos parenteses não é
+necessário para o processamento Scheme; os colchetes servem para
+evitar o processamento de marcas nos parágrafos; as marcas são
+[*/|]. Se eu desejar escrever um Scheme qualquer que não retorne uma
+string contendo /marcas/, fico livre dos colchetes. Por exemplo, para
+escrever ``1 =~ log 2.71 = (number->string (log 2.71))...'' bastaria escrever 
+
+@v ``1 =~ log 2.71 = (number->string (log 2.71))...''
+v@
+
+Entende? Pode olhar este próprio [(ln "elproc/elproc.elproc"
+"documento")] para ter uma idéia melhor. Veja aí.
+
+@1lend Sun Aug 30 02:20:23 CEST 2009

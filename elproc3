@@ -1,0 +1,178 @@
+#!/usr/bin/env mzscheme
+(module elproc3 scheme
+
+(provide (all-defined-out))
+
+;; hash table for @-functions
+;; (define tab-at (make-hash))
+
+;; scanner
+(define (next-token [in (current-input-port)])
+  (current-input-port in)
+
+  (let ([c (peek-char)])
+    ;(printf "token: <~a>\n" c)
+    (cond
+
+     ; eof
+     [ (eq? c eof) (consume-char-returning (list 'exit c)) ]
+
+     ; scheme code
+     [ (eq? c #\() (list 'scheme (read)) ]
+
+     ; escape
+     [ (eq? c #\\) (list 'char (begin (read-char) (read-char))) ]
+
+     ; newline
+     [ (eq? c #\newline) 
+       (cond
+	[ (and ; stand alone paragraphs begins
+	   (= 0 (length g-stack))
+	   (let ([next (peek-char in 1)])
+	     (and ; if eof, bail out; a paragraph cannot begin in eof, right?
+	      (not (eq? eof next)) 
+	      (char-alphabetic? next))))
+	  (open "par")
+	  (read-char) ; cosmetics. discard the first newline
+	  (list '@ "par")]
+
+	[ (and ; stand alone paragraphs ends
+	   (not (= 0 (length g-stack)))
+	   (equal? (first g-stack) "par")
+	   (let ([next (peek-char in 1)])
+	     (or ; eof means it should close indeed
+	      (eq? eof next)
+	      (equal? #\newline next))))
+	  (close "par")
+	  (list '@-close "par")]
+
+	[ else
+	  (consume-char-returning (list 'newline c)) ])]
+
+     ; whitespace
+     [ (char-whitespace? c) (consume-char-returning (list 'space c)) ]
+
+     ; if @ is in the flux, peek and see if the next is alphabetic; if
+     ; so, then it's a command; otherwise return the character @
+     ; because we shall treat it as if we had found \@, by itself, in
+     ; the flux. notice that email@addresses are no problem; they're
+     ; words; see read-word.
+     [ (eq? c #\@) 
+       (let ([c (peek-char (current-input-port) 1)])
+	 ;(printf "@-token: <~a>\n" c)
+	 (cond 
+	  [ (char-alphabetic? c) 
+	    (read-char) 
+	    (list '@ (read-word))]
+	  [ else (list 'char (read-char)) ]))]
+
+     ; word
+     [ (char-alphabetic? c) 
+       (let ([w (read-word)])
+	 (cond
+	  [ (regexp-match "@$" w) (list '@-close (rm-last-char w))]
+	  [ else (list 'word w) ]))]
+
+     ; non text data? treat it as a mere byte for now (for always!)
+     [ else (consume-char-returning (list 'char c)) ])))
+
+; parser-string
+(define (parser-string s)
+  (parser (open-input-string s)))
+
+; parser
+(define (parser [in (current-input-port)])
+  (let ( [token (next-token in)] )
+    (let ([sym (first token)] [val (second token)])
+
+      ;(printf "(~a | ~a)" sym val)
+
+      (cond 
+
+        [ (eq? sym 'exit)
+	  (when (not (= 0 (length g-stack)))
+	    (syn "the following tags where not closed: ~a" g-stack))
+          (printf "(exit)\n")]
+
+        [ (eq? sym 'scheme)
+	  (display (format "~s" val))
+	  (parser)]
+
+	[ (eq? sym 'newline)
+	  (out (format "~s " (string val)))
+	  (parser)]
+
+	[ (or (eq? sym 'char)
+	      (eq? sym 'space))
+	  (out (format "~s " (string val)))
+	  (parser)]
+
+        [ (eq? sym 'word)
+	  (out (format "~s " val))
+	  (parser)]
+
+        ; recursively[?] dig for more
+        [ (eq? sym '@)
+	  (open val)
+	  (printf "(~a (list " val)
+	  (parser)]
+
+	[ (eq? sym '@-close)
+	  (close val)
+	  (printf "))\n")
+	  (parser)]
+
+	[ else 
+	  (syn (format "roar! found a raptor: (~a ~a)\n" sym val))]))))
+
+(define g-stack '())
+
+(define (open x)
+  (set! g-stack (cons x g-stack))
+  g-stack)
+
+(define (close x)
+  (when (equal? g-stack '())
+    (err "g-stack: stack underflow"))
+  (set! g-stack (cdr g-stack))
+  g-stack)
+
+; remove-last-char
+(define (rm-last-char s)
+  (list->string (reverse (cdr (reverse (string->list s))))))
+
+(define (out s)
+  (display 
+   (cond 
+    [(= (length g-stack) 0)
+     (format "(display ~a)\n" s)]
+    [ else
+       (format "~a" s)])))
+
+(define (syn s . args)
+  (flush-output)
+  (fprintf (current-error-port) "\nsyntax error: ~a\n" (format s (first args)))
+  (exit))
+
+(define (err s . args)
+  (flush-output)
+  (fprintf (current-error-port) "\ninternal error: ~a\n" (format s (first args)))
+  (exit))
+
+;; word: a non-whitespace sequence of chars
+(define (read-word)
+  (let ([c (peek-char)]) ; leave whitespace in the flux
+    (cond
+     [ (or (eq? c eof) 
+	   (char-whitespace? c)) "" ]
+     [ else (string-append (string (read-char)) (read-word)) ])))
+
+;; consume a char returning p
+(define (consume-char-returning p)
+  (read-char)
+  p)
+
+; main =
+(parser)
+
+)
